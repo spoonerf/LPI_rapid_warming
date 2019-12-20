@@ -336,83 +336,82 @@ gras_s<-stack(list.files(path =  here::here("hyde_data"), pattern = "^.*gras*.*.
 ```{r, cache=TRUE}
 ###########LPI data
 
-LPI_LUC<-read.csv("populations_to_use.csv")
+LPI_LUC <- read.csv("populations_to_use.csv")
 
-latlong<-cbind(LPI_LUC$Longitude,LPI_LUC$Latitude)
+latlong <- cbind(LPI_LUC$Longitude,LPI_LUC$Latitude)
 
-x<-latlong[,1]
-y<-latlong[,2]
+x <- latlong[,1]
+y <- latlong[,2]
+id <- LPI_LUC$ID
 
-xy<-cbind(id,x,y) #creating the grid around the population - 5km either side gives a grid of 121km^2
-xy<-na.omit(xy)
-id<-xy[,1]
+xy <- cbind(id,x,y) #creating the grid around the population - 5km either side gives a grid of 121km^2
+xy <- na.omit(xy)
+id <- xy[,1]
 
-points<-SpatialPoints(cbind(xy[,2], xy[,3]))
+points <- SpatialPoints(cbind(xy[,2], xy[,3]))
 
+xmin <- colFromX(crop_s[[1]], points@coords[,1]) - 1
+xmax <- colFromX(crop_s[[1]], points@coords[,1]) + 1
+ymin <- rowFromY(crop_s[[1]], points@coords[,2]) - 1
+ymax <- rowFromY(crop_s[[1]], points@coords[,2]) + 1    
 
-xmin<- colFromX(crop_s[[1]], points[1:length(points),]) - 1
-xmax<- colFromX(crop_s[[1]], points[1:length(points),]) + 1
-ymin<- rowFromY(crop_s[[1]], points[1:length(points),]) - 1
-ymax<- rowFromY(crop_s[[1]], points[1:length(points),]) + 1    
+grid_crop <- data.frame(ID=id,xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)   #setting extents of grid to extract
 
-
-grid_crop<-data.frame(ID=id,xmin=xmin, xmax=xmax, ymin=ymin, ymax=ymax)   #setting extents of grid to extract
-
-grid_crop2<-merge(grid_crop,LPI_LUC, by="ID")
-
-grid_crop2<-subset(grid_crop2, Specific_location ==1) 
+grid_crop2 <- merge(grid_crop,LPI_LUC, by="ID")
 
 nrow(grid_crop2)
 ```
 
 
 ```{r, cache=TRUE, eval=FALSE}
-library(taRifx)
-library(zoo)
 
 result <- data.frame() #empty result dataframe
 
+grid_crop2[grid_crop2 == 'NULL'] <- NA
+
 for (i in 1:length(grid_crop2$ID)){
   
-  ID<-grid_crop2[i,1]
-  Binomial<-as.character(grid_crop2[i,6])
-  spid = grid_crop2[i,69:134]                     #subsetting only the dates
-  colnames(spid)<-1950:2015
+  ID <- grid_crop2[i,1]
+  Binomial <- as.character(grid_crop2[i,6])
+  spid <- grid_crop2[i,69:124]                     #subsetting only the dates
+  colnames(spid) <- 1950:2005
   
-  Date<-as.numeric(colnames(spid))
-  spidt<-destring(t(spid))
+  if(any(!is.na(spid))){
+    
+  Date <- as.numeric(colnames(spid))
+  spidt <- destring(t(spid))
   
-  Year<-Date[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
-  Population<-spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
+  Year <- Date[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
+  Population <- spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
 
-  crop_check<-crop(crop_s, extent(crop_s, grid_crop2[i,4],grid_crop2[i,5],grid_crop2[i,2],grid_crop2[i,3]))
-  gras_check<-crop(gras_s, extent(gras_s, grid_crop2[i,4],grid_crop2[i,5],grid_crop2[i,2],grid_crop2[i,3]))
+  crop_check <- crop(crop_s, extent(crop_s, grid_crop2[i,4],grid_crop2[i,5],grid_crop2[i,2],grid_crop2[i,3]))
+  gras_check <- crop(gras_s, extent(gras_s, grid_crop2[i,4],grid_crop2[i,5],grid_crop2[i,2],grid_crop2[i,3]))
   
-  crop_df<-data.frame(as.matrix(crop_check))
-  gras_df<-data.frame(as.matrix(gras_check))
+  crop_df <- data.frame(as.matrix(crop_check))
+  gras_df <- data.frame(as.matrix(gras_check))
   
-  decs<-c("1940","1950","1960","1970","1980","1990","2000","2005")
-  colnames(crop_df)<-decs
-  colnames(gras_df)<-decs
+  decs <- c("1940","1950","1960","1970","1980","1990","2000","2005")
+  colnames(crop_df) <- decs
+  colnames(gras_df) <- decs
   
-  mean_crop_df<-colMeans(crop_df)
-  mean_crop_df2<-data.frame(mean_crop_df, decs)
-  colnames(mean_crop_df2)<-c("mean_crop", "Year")
+  mean_crop_df <- colMeans(crop_df)
+  mean_crop_df2 <- data.frame(mean_crop_df, decs)
+  colnames(mean_crop_df2) <- c("mean_crop", "Year")
   
-  mean_gras_df<-colMeans(gras_df)
-  mean_gras_df2<-data.frame(mean_gras_df, decs)
-  colnames(mean_gras_df2)<-c("mean_grass", "Year")
+  mean_gras_df <- colMeans(gras_df)
+  mean_gras_df2 <- data.frame(mean_gras_df, decs)
+  colnames(mean_gras_df2) <- c("mean_grass", "Year")
   
-  Year_na<-rep(NA, length(1940:2005))
-  Year_all<-1940:2005
-  Yr<-cbind(Year_all, Year_na)
-  colnames(Yr)<-c("Year", "Year_NA")
+  Year_na <- rep(NA, length(1940:2005))
+  Year_all <- 1940:2005
+  Yr <- cbind(Year_all, Year_na)
+  colnames(Yr) <- c("Year", "Year_NA")
   
-  Yr_intrp_crop<-merge(Yr, mean_crop_df2, by="Year", all=T)
-  Yr_intrp_gras<-merge(Yr, mean_gras_df2, by="Year", all=T)
+  Yr_intrp_crop <- merge(Yr, mean_crop_df2, by="Year", all=T)
+  Yr_intrp_gras <- merge(Yr, mean_gras_df2, by="Year", all=T)
   
-  min_yr<-min(Year)
-  max_yr<-max(Year)
+  min_yr <- min(Year)
+  max_yr <- max(Year)
   
   
   if (min_yr != max_yr & min_yr < 2005 & sum(is.na(Yr_intrp_crop$mean_crop))<60) {
@@ -425,7 +424,8 @@ for (i in 1:length(grid_crop2$ID)){
     gras_change<-mean(diff(subset(Yr_intrp_gras, Year >= min_yr & Year <= max_yr)$mean_gras_int))
     both_change<-mean(diff(subset(Yr_intrp_crop, Year >= min_yr & Year <= max_yr)$both))
     both_sum<-sum(diff(subset(Yr_intrp_crop, Year >= min_yr & Year <= max_yr)$both))
-  }else{
+    }
+  } else {
     crop_change<-NA
     gras_change<-NA
     both_change<-NA
@@ -439,29 +439,28 @@ for (i in 1:length(grid_crop2$ID)){
   
 }
 
-#write.csv(result, "Hyde_crop_pasture_annual_change_sum.csv")
+#write.csv(result, "HYDE_LPI_rate_of_change.csv")
 
 ```
 
 ```{r, cache=TRUE, warning=FALSE}
-lpi<-read.csv("LPI_pops_20160523_edited.csv")
-bm<-read.csv("Amniote_Database_Aug_2015.csv")
-bm$Binomial<-paste(bm$genus, bm$species, sep="_")
+lpi <- read.csv("LPI_pops_20160523_edited.csv")
+bm <- read.csv("Amniote_Database_Aug_2015.csv")
+bm$Binomial <- paste(bm$genus, bm$species, sep="_")
 
-lpibm<-merge(lpi, bm, by="Binomial")
+lpibm <- merge(lpi, bm, by="Binomial")
 
-lpibm<-data.frame(lpibm$Binomial, lpibm$ID, lpibm$adult_body_mass_g)
-head(lpibm)
-colnames(lpibm)<-c("Binomial", "ID", "Body_mass_g")
+lpibm <- data.frame(lpibm$Binomial, lpibm$ID, lpibm$adult_body_mass_g)
+colnames(lpibm) <- c("Binomial", "ID", "Body_mass_g")
 
-lpibm$Log_Body_Mass_g<-log10(lpibm$Body_mass_g)
+lpibm$Log_Body_Mass_g <- log10(lpibm$Body_mass_g)
 
-lpibm2<-lpibm[lpibm$Body_mass_g !=-999,]
+lpibm2 <- lpibm[lpibm$Body_mass_g !=-999,]
 
 
-lpibm2<-unique(lpibm2)
+lpibm2 <- unique(lpibm2)
 
-lpibm2$Log_Body_Mass_g<-log10(lpibm2$Body_mass_g)
+lpibm2$Log_Body_Mass_g <- log10(lpibm2$Body_mass_g)
 
 #write.csv(lpibm2, "LPI_BodyMass_Amniote_Database.csv")
 
