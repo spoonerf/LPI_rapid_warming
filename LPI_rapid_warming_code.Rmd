@@ -7,6 +7,7 @@ output: html_document
 
 Step 1 - Calculating Lambdas for each population
 ```{r, message=FALSE, warning=FALSE}
+library(broom)
 library(dplyr)
 library(doParallel)
 library(here)
@@ -16,6 +17,7 @@ library(raster)
 library(reshape2)
 library(taRifx)
 library(zoo)
+
 ```
 
 Subsetting the data to exclude fish, populations in marine systems and those without specific locations
@@ -194,24 +196,24 @@ stopCluster(cl)
 
 ```{r, cache=TRUE, eval=FALSE}
 
-dates<-seq(ymd('1931-01-16'),ymd('2014-12-16'), by = 'months')
+dates <- seq(ymd('1931-01-16'),ymd('2014-12-16'), by = 'months')
 
-datesr<-rep(dates, each=length(xy[,1]))   #each number should be number of pops
+datesr <- rep(dates, each=length(xy[,1]))   #each number should be number of pops
 
-srm<-melt(sr)
+srm <- melt(sr)
 
-lon<-xy[,1]
-lat<-xy[,2]
+lon <- xy[,1]
+lat <- xy[,2]
 
-srm2<-cbind(lon,lat,datesr, srm)
+srm2 <- cbind(lon,lat,datesr, srm)
 
-srm3<-srm2[,c(1,2,3,6)]
+srm3 <- srm2[,c(1,2,3,6)]
 
-colnames(srm3)<-c("Longitude", "Latitude", "Date", "Mean_T")
+colnames(srm3) <- c("Longitude", "Latitude", "Date", "Mean_T")
 
-LPI_ID<-LPIsp[,c("ID", "Longitude", "Latitude")]
+LPI_ID <- LPIsp[,c("ID", "Longitude", "Latitude")]
 
-LPIclim<-merge(srm3, LPI_ID, by=c("Longitude", "Latitude"))
+LPIclim <- merge(srm3, LPI_ID, by=c("Longitude", "Latitude"))
 
 #write.csv(LPIclim, "Global_Mean_Temp.csv")
 
@@ -219,49 +221,46 @@ LPIclim<-merge(srm3, LPI_ID, by=c("Longitude", "Latitude"))
 
 
 ```{r, cache=TRUE}
-LPIclim<-read.csv("Global_Mean_Temp_All_LPI_nobuff_1931_moreLPI.csv")
+LPIclim <- read.csv("Global_Mean_Temp.csv")
   
-LPIclim$Date<-as.Date(LPIclim$Date, "%Y-%m-%d")
-LPIclim$Year<-format(LPIclim$Date, "%Y")
+LPIclim$Date <- as.Date(LPIclim$Date, "%Y-%m-%d")
+LPIclim$Year <- format(LPIclim$Date, "%Y")
 
-LPIclim<-na.omit(LPIclim)
+LPIclim <- na.omit(LPIclim)
 
-LPI<-read.csv("LPI_pops_20160523_edited.csv")
+LPI <- read.csv("LPI_pops_20160523_edited.csv")
 
-LPIsp<-subset(LPI, Specific_location==1 & System !="Marine" & Class != "Actinopterygii"& Class != "Cephalaspidomorphi" & ID !=4438)
+LPI <- read.csv("LPI_pops_20160523_edited.csv")
 
-pop_data<- LPIsp[,c(1,65:120)]
-ID<-LPIsp$ID
+LPI_pop <- LPI %>% 
+  filter(Specific_location==1 & System !="Marine" & Class != "Actinopterygii"& Class != "Cephalaspidomorphi")
+
+pop_data <- LPI_pop %>% 
+  dplyr::select(ID, X1950:X2005)  #selecting out just the ID and the years we are interested in
 
 pop_datab <- (pop_data [,2:57] !="NULL")
-points_per_pop1950_2005 = rowSums(pop_datab)
-length_id <- data.frame(ID,points_per_pop1950_2005)
+points_per_pop1950_2005 <- rowSums(pop_datab)  #calculating the number of years with population estimates
+length_id <- data.frame(ID = pop_data$ID,points_per_pop1950_2005)
 
-LPIsp2<-merge(length_id, LPIsp, by = "ID")
-LPIsp2<-subset(LPIsp2, points_per_pop1950_2005 >=2)
+LPI_pop <- merge(length_id, LPI_pop, by = "ID")
 
-LPIsp2<-LPIsp2[,c(1:3,66:121)]
-LPIsp2[LPIsp2 == 'NULL'] = NA
+LPI_pop <- LPI_pop %>% 
+  filter(points_per_pop1950_2005 >= 2)    #filtering out any population trends with fewer than 2 estimates between 1950 and 2005
+  
+LPI_pop <- LPI_pop %>% 
+  dplyr::select(ID:Binomial, X1950:X2005)  #selecting out just the ID and the years we are interested in
 
-nrow(LPIsp2)
+LPI_pop[LPI_pop == 'NULL'] <- NA
 
-LPIclim<-LPIclim[LPIclim$ID %in% LPIsp2$ID,]
+LPIsp <- LPI_pop %>% 
+  filter(ID %in% LPIclim$ID)
 
-LPIsp2<-LPIsp2[LPIsp2$ID %in% LPIclim$ID,]
-
-```
-
-```{r, cache=TRUE, message=FALSE, warning=FALSE}
-library(broom)
-library(plyr)
-library(taRifx)
 ```
 
 ```{r, cache=TRUE}
-lag<-0 #number of years before start date of pop records which I want climate data from
 
 doMean = function(sp_name) {
-  spid2 = subset(LPIsp2, ID == sp_name)   #subsetting the population data by each population
+  spid2 = subset(LPIsp, ID == sp_name)   #subsetting the population data by each population
   spid = spid2[,4:59]                     #subsetting only the dates
   nid<-matrix(rep (NA, 10), nrow=1)                
   colnames(nid)<-1940:1949
@@ -278,7 +277,7 @@ doMean = function(sp_name) {
   Date<-as.numeric(colnames(spid))
   spidt<-destring(t(spid))
 
-  Year<-Date[(min(which(!is.na(spidt)))-lag):max(which(!is.na(spidt)))]
+  Year<-Date[(min(which(!is.na(spidt)))):max(which(!is.na(spidt)))]
   Population<-spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
 
   Mean<-year_temp$mean_mean[(min(which(!is.na(spidt)))-lag):max(which(!is.na(spidt)))]
@@ -306,16 +305,11 @@ doMean = function(sp_name) {
   return(mean_df)
 }
 
-all_df_list <- lapply(unique(LPIsp2$ID), doMean)
+all_df_list <- lapply(unique(LPIsp$ID), doMean)
 
 
 ```
 
-```{r}
-
-
-
-```
 
 ```{r, cache=TRUE}
 all_matrix <- matrix(unlist(all_df_list), ncol=7, byrow=TRUE)
