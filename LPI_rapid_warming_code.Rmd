@@ -7,9 +7,12 @@ output: html_document
 
 Step 1 - Calculating Lambdas for each population
 ```{r, message=FALSE, warning=FALSE}
+devtools::install_github("timnewbold/GISOperations")
+
 library(broom)
 library(dplyr)
-library(doParallel)
+library(devtools)
+library(GISOperations)
 library(here)
 library(lubridate)
 library(mgcv)
@@ -17,7 +20,6 @@ library(raster)
 library(reshape2)
 library(taRifx)
 library(zoo)
-
 ```
 
 Subsetting the data to exclude fish, populations in marine systems and those without specific locations
@@ -45,6 +47,8 @@ LPI_pop <- LPI_pop %>%
   dplyr::select(ID:Binomial, X1950:X2005)  #selecting out just the ID and the years we are interested in
 
 LPI_pop[LPI_pop == 'NULL'] <- NA
+
+#write.csv(LPI_pop, "populations_to_use.csv", row.names = FALSE)
 
 ```
 
@@ -140,7 +144,6 @@ CR70s<-brick(here::here("climate_data","cru_ts3.23.1971.1980.tmp.dat.nc"))
 CR80s<-brick(here::here("climate_data","cru_ts3.23.1981.1990.tmp.dat.nc"))
 CR90s<-brick(here::here("climate_data","cru_ts3.23.1991.2000.tmp.dat.nc"))
 CR00s<-brick(here::here("climate_data","cru_ts3.23.2001.2010.tmp.dat.nc"))
-CR10s<-brick(here::here("climate_data","cru_ts3.23.2011.2014.tmp.dat.nc"))
 ```
 
 Subsetting the data to exclude fish, populations in marine systems and those without specific locations
@@ -153,7 +156,7 @@ all_df <- read.csv("Global_Population_Lambdas.csv", stringsAsFactors = FALSE)
 LPIsp <- LPI %>% 
   filter(LPI$ID %in% all_df$sp_name)
 
-CR<-stack(CR30s,CR40s,CR50s,CR60s,CR70s,CR80s,CR90s,CR00s,CR10s)
+CR<-stack(CR30s,CR40s,CR50s,CR60s,CR70s,CR80s,CR90s,CR00s)
 
 xy<-data.frame(LPIsp$Longitude, LPIsp$Latitude)
 
@@ -167,224 +170,165 @@ coordinates(xy_df) <- c("lon", "lat")
 
 ```{r}
 
-n <- detectCores() - 1
-cl <- makeCluster(n)
-registerDoParallel(cl)  
-getDoParWorkers()
+years <- rep(1931:2010, each = 12)
 
-buff<- function (year, b)  {
-  
-  rasterex<-raster:::extract(CR[[year]], xy_df, buff=b, fun=mean, na.rm=TRUE)
-  return(rasterex)
-  
-}
+annual_ras <- function(year, rast){
+    
+  ann_ras <- mean(rast[[which(years == year)]])
+  names(ann_ras) <-  paste0("Year_", year)
+  return(ann_ras)
 
-```
+  }
 
-```{r, cache=TRUE, eval=FALSE}
-diam<-0 #size of buffer to use - in metres
-lyr<-1:nlayers(CR)
+cr_out <- lapply(X = unique(years), FUN  = annual_ras, rast = CR)
 
-stime <- system.time({
-  sr <- foreach(1, .combine = cbind) %dopar% mapply(buff,lyr,diam)
-})
-stime
-
-stopCluster(cl)
+cr_st<- do.call(stack, cr_out)
 
 ```
 
-```{r, cache=TRUE, eval=FALSE}
+```{r}
 
-dates <- seq(ymd('1931-01-16'),ymd('2014-12-16'), by = 'months')
+mt_out <- raster::extract(cr_st, xy_df, nl = nlayers(cr_st))
 
-datesr <- rep(dates, each=length(xy[,1]))   #each number should be number of pops
+mt_df <- data.frame(xy_df@coords, mt_out, row.names = NULL)
 
-srm <- melt(sr)
+melt_df <- melt(mt_df, id = c("lon", "lat"))
 
-lon <- xy[,1]
-lat <- xy[,2]
+colnames(melt_df) <- c("Longitude", "Latitude", "Date", "Mean_T")
 
-srm2 <- cbind(lon,lat,datesr, srm)
-
-srm3 <- srm2[,c(1,2,3,6)]
-
-colnames(srm3) <- c("Longitude", "Latitude", "Date", "Mean_T")
-
-LPI_ID <- LPIsp[,c("ID", "Longitude", "Latitude")]
-
-LPIclim <- merge(srm3, LPI_ID, by=c("Longitude", "Latitude"))
-
-#write.csv(LPIclim, "Global_Mean_Temp.csv")
+#write.csv(melt_df, "Global_Mean_Temp.csv", row.names = FALSE)
 
 ```
 
 
 ```{r, cache=TRUE}
-LPIclim <- read.csv("Global_Mean_Temp.csv")
+LPI_pop <- read.csv("populations_to_use.csv")
+
+LPI_pop$ID <- as.integer(LPI_pop$ID)
+
+LPIclim <- read.csv("Global_Mean_Temp.csv", stringsAsFactors = FALSE)
   
-LPIclim$Date <- as.Date(LPIclim$Date, "%Y-%m-%d")
-LPIclim$Year <- format(LPIclim$Date, "%Y")
+LPIclim$Year <- as.numeric(gsub("Year_","",LPIclim$Date))
 
-LPIclim <- na.omit(LPIclim)
+LPIclim <- LPIclim[complete.cases(LPIclim),]
 
-LPI <- read.csv("LPI_pops_20160523_edited.csv")
+LPIclim <-merge(LPI_pop[,c("ID", "Binomial", "Longitude", "Latitude")], LPIclim, by = c("Longitude", "Latitude"))
 
-LPI <- read.csv("LPI_pops_20160523_edited.csv")
 
-LPI_pop <- LPI %>% 
-  filter(Specific_location==1 & System !="Marine" & Class != "Actinopterygii"& Class != "Cephalaspidomorphi")
-
-pop_data <- LPI_pop %>% 
-  dplyr::select(ID, X1950:X2005)  #selecting out just the ID and the years we are interested in
-
-pop_datab <- (pop_data [,2:57] !="NULL")
-points_per_pop1950_2005 <- rowSums(pop_datab)  #calculating the number of years with population estimates
-length_id <- data.frame(ID = pop_data$ID,points_per_pop1950_2005)
-
-LPI_pop <- merge(length_id, LPI_pop, by = "ID")
-
-LPI_pop <- LPI_pop %>% 
-  filter(points_per_pop1950_2005 >= 2)    #filtering out any population trends with fewer than 2 estimates between 1950 and 2005
-  
-LPI_pop <- LPI_pop %>% 
-  dplyr::select(ID:Binomial, X1950:X2005)  #selecting out just the ID and the years we are interested in
-
-LPI_pop[LPI_pop == 'NULL'] <- NA
-
-LPIsp <- LPI_pop %>% 
-  filter(ID %in% LPIclim$ID)
 
 ```
 
 ```{r, cache=TRUE}
 
 doMean = function(sp_name) {
-  spid2 = subset(LPIsp, ID == sp_name)   #subsetting the population data by each population
-  spid = spid2[,4:59]                     #subsetting only the dates
-  nid<-matrix(rep (NA, 10), nrow=1)                
-  colnames(nid)<-1940:1949
-  colnames(spid)<-1950:2005
-  spid<-cbind(nid, spid)#renaming the date column names as R doesn't like numbered column names
-  climid=subset(LPIclim, ID == sp_name)  #subsetting the climate data by each population
+
+  spid2 <- LPI_pop %>% 
+    filter(ID == sp_name)   #subsetting the population data by each population
   
-  year_temp <- ddply(climid, "Year", summarise,          #calculating the annual mean for max temp, min temp and precipitation
-                     mean_mean = mean(na.omit(Mean_T)))
-  name<-spid2$Binomial
-  id<-spid2$ID
-  points<-spid2$points_per_pop1950_2005
-  name_id<-paste(name, id, sep="_") #creating id for naming files of plots
-  Date<-as.numeric(colnames(spid))
-  spidt<-destring(t(spid))
+  spid <- spid2 %>% 
+   dplyr::select(X1950:X2005)
+  
+  colnames(spid)<-1950:2005              #renaming the date column names as R doesn't like numbered column names
+  nid <- matrix(rep (NA, 10), nrow=1)                
+  colnames(nid) <- 1940:1949
+  spid <- cbind(nid, spid)#renaming the date column names as R doesn't like numbered column names
+  climid <- LPIclim %>% 
+    filter(ID == sp_name, Year >=  1940 & Year <= 2005) %>% 
+    arrange(Year)#subsetting the climate data by each population
+  
+  name <- spid2$Binomial
+  id <- spid2$ID
+  points <- spid2$points_per_pop1950_2005
+  Date <- as.numeric(colnames(spid))
+  spidt <- destring(t(spid))
+  mean_change <- NA
+  
+  if (any(!is.na(spidt))){
+    
+  Year <- Date[(min(which(!is.na(spidt)))):max(which(!is.na(spidt)))]
+  Population <- spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
 
-  Year<-Date[(min(which(!is.na(spidt)))):max(which(!is.na(spidt)))]
-  Population<-spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
-
-  Mean<-year_temp$mean_mean[(min(which(!is.na(spidt)))-lag):max(which(!is.na(spidt)))]
+  Mean <- climid$Mean_T[(min(which(!is.na(spidt)))):max(which(!is.na(spidt)))]
   
   mean_change<-sum(diff(Mean))
-  
-  Mean_mon<-climid[climid$Year %in% Year, ]$Mean_T
-  year_temp$Year<-as.numeric(year_temp$Year)
 
-  if (sum(is.nan(Mean))!=length(Mean)){
+  if (sum(is.na(Mean))!=length(Mean)){
     
-    lm_mean<-lm(Mean~Year)
+    lm_mean <- lm(Mean~Year)
     #lm_mean<-lm(year_temp$mean_mean~year_temp$Year)
-    lm_mean_df<-tidy(lm_mean)[2,]  
-    mean_df<-cbind(id,mean_change, lm_mean_df)
+    lm_mean_df <- tidy(lm_mean)[2,]  
+    mean_df <- cbind(id,mean_change, lm_mean_df)
     
+    } 
   } else{
     
-    mean_df<-matrix(c(id,mean_change,NA,NA,NA,NA,NA), nrow=1, ncol=6)
-    colnames(mean_df)<-c("id","mean_change" ,"term", "estimate", "std.error", "statistic", "p.value")
+    mean_df <- matrix(c(id,mean_change,NA,NA,NA,NA,NA), nrow=1, ncol=7)
+    colnames(mean_df) <- c("id","mean_change" ,"term", "estimate", "std.error", "statistic", "p.value")
     #mean_df<-data.frame(mean_df)
   }
   
-  #print(mean_df)  
+  print(sp_name)  
   return(mean_df)
 }
 
-all_df_list <- lapply(unique(LPIsp$ID), doMean)
+all_df_list <- lapply(unique(LPI_pop$ID), doMean)
 
 
 ```
 
 
 ```{r, cache=TRUE}
-all_matrix <- matrix(unlist(all_df_list), ncol=7, byrow=TRUE)
-mean_df <- data.frame(all_matrix)
+mean_df <- do.call(rbind, all_df_list)
 colnames(mean_df) <- c("ID", "Sum_Mean_Change","Term","Estimate","SE","Statistic","p.val")
 
-mean_df$Estimate<-as.numeric(as.character(mean_df$Estimate))
-
-#write.csv(mean_df, "All_LPI_All_Years_Nobuff_1931_moreLPI_end2005.csv")#to go with hyde
+#write.csv(mean_df, "Mean_Temp_Change_LPI_pops.csv", row.names = FALSE)
 
 ```
 
 
-Calculating land use change
+Calculating rates of land use change
 
 ```{r, warning=FALSE, message=FALSE}
-#install.packages("devtools")
-library(devtools)
-#install_github("timnewbold/GISOperations")
-library(GISOperations)
-library(raster)
 
-crop1940<-raster("crop1940AD.asc")
-gras1940<-raster("gras1940AD.asc")
+crop1940<-raster(here::here("hyde_data","crop1940AD.asc"))
+gras1940<-raster(here::here("hyde_data","gras1940AD.asc"))
 
-crop1950<-raster("crop1950AD.asc")
-gras1950<-raster("gras1950AD.asc")
+crop1950<-raster(here::here("hyde_data","crop1950AD.asc"))
+gras1950<-raster(here::here("hyde_data","gras1950AD.asc"))
 
-crop1960<-raster("crop1960AD.asc")
-gras1960<-raster("gras1960AD.asc")
+crop1960<-raster(here::here("hyde_data","crop1960AD.asc"))
+gras1960<-raster(here::here("hyde_data","gras1960AD.asc"))
 
-crop1970<-raster("crop1970AD.asc")
-gras1970<-raster("gras1970AD.asc")
+crop1970<-raster(here::here("hyde_data","crop1970AD.asc"))
+gras1970<-raster(here::here("hyde_data","gras1970AD.asc"))
 
-crop1980<-raster("crop1980AD.asc")
-gras1980<-raster("gras1980AD.asc")
+crop1980<-raster(here::here("hyde_data","crop1980AD.asc"))
+gras1980<-raster(here::here("hyde_data","gras1980AD.asc"))
 
-crop1990<-raster("crop1990AD.asc")
-gras1990<-raster("gras1990AD.asc")
+crop1990<-raster(here::here("hyde_data","crop1990AD.asc"))
+gras1990<-raster(here::here("hyde_data","gras1990AD.asc"))
 
-crop2000<-raster("crop2000AD.asc")
-gras2000<-raster("gras2000AD.asc")
+crop2000<-raster(here::here("hyde_data","crop2000AD.asc"))
+gras2000<-raster(here::here("hyde_data","gras2000AD.asc"))
 
-crop2005<-raster("crop2005AD.asc")
-gras2005<-raster("gras2005AD.asc")
+crop2005<-raster(here::here("hyde_data","crop2005AD.asc"))
+gras2005<-raster(here::here("hyde_data","gras2005AD.asc"))
 
 
 rlist<-list(crop1940,crop1950,crop1960,crop1970,crop1980,crop1990,crop2000,crop2005,gras1940,gras1950,gras1960,gras1970,gras1980,gras1990,gras2000,gras2005)
 cellareas <- DegreeCellAreaKM(lat=coordinates(crop1940)[,2],height=res(crop1940)[2],width=res(crop1940)[1])
-
-
 
 for (map in rlist){
   
   map_pcnt<-signif(values(map),digits=4)/cellareas
   map_pcnt_m<-matrix(map_pcnt, nrow=nrow(map), ncol=ncol(map), byrow=TRUE)
   map_pcnt_r<-raster(map_pcnt_m, xmn=map@extent[1], xmx=map@extent[2], ymn=map@extent[3], ymx=map@extent[4])
-  writeRaster(map_pcnt_r, paste(names(map),"raster.tif", sep="_"),overwrite=TRUE)
-  #print(names(map))
+  writeRaster(map_pcnt_r, here::here("hyde_data", paste0(names(map),"_raster.tif")),overwrite=TRUE)
+  print(names(map))
 }
 
-
-crop_s<-stack(list.files(path = getwd(), pattern = "^.*crop*.*.tif$"))
-gras_s<-stack(list.files(path = getwd(), pattern = "^.*gras*.*.tif$"))
-
-
-nat_1940<-(1 - (crop_s[[1]] + gras_s[[1]]))
-nat_2005<-(1 - (crop_s[[7]] + gras_s[[7]]))
-plot(nat_2005 - nat_1940, main="Change in Natural Land Use 1940 - 2005")
-
-anth_1940<- (crop_s[[1]] + gras_s[[1]])
-anth_2005<-(crop_s[[7]] + gras_s[[7]])
-
-plot(anth_2005 - anth_1940, main="Change in Cropland and Pasture Land Use 1940 - 2005")
-
+crop_s<-stack(list.files(path = here::here("hyde_data"), pattern = "^.*crop*.*.tif$", full.names = TRUE))
+gras_s<-stack(list.files(path =  here::here("hyde_data"), pattern = "^.*gras*.*.tif$", full.names = TRUE))
 
 ```
 
@@ -392,22 +336,8 @@ plot(anth_2005 - anth_1940, main="Change in Cropland and Pasture Land Use 1940 -
 ```{r, cache=TRUE}
 ###########LPI data
 
-LPI_LUC<-read.csv("LPI_pops_20160523_edited.csv")
+LPI_LUC<-read.csv("populations_to_use.csv")
 
-LPI_pop<-subset(LPI_LUC, Specific_location==1 & System !="Marine" & Class != "Actinopterygii"& Class != "Cephalaspidomorphi")
-
-ID<-LPI_pop$ID
-pop_data<- LPI_pop[,c(1,65:130)]
-
-pop_datab <- (pop_data [,2:67] !="NULL")
-points_per_pop1950_2012 = rowSums(pop_datab)
-length_id <- data.frame(ID,points_per_pop1950_2012)
-
-LPI_LUC<-merge(length_id, LPI_pop, by = "ID")
-LPI_LUC<-subset(LPI_pop, points_per_pop1950_2012 >=2)
-
-
-id<-LPI_LUC$ID
 latlong<-cbind(LPI_LUC$Longitude,LPI_LUC$Latitude)
 
 x<-latlong[,1]
