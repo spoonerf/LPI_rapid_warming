@@ -7,15 +7,14 @@ output: html_document
 
 Step 1 - Calculating Lambdas for each population
 ```{r, message=FALSE, warning=FALSE}
-devtools::install_github("timnewbold/GISOperations")
-
 library(broom)
+library(data.table)
 library(dplyr)
-library(devtools)
-library(GISOperations)
 library(here)
+library(lme4)
 library(lubridate)
 library(mgcv)
+library(ncdf4)
 library(raster)
 library(reshape2)
 library(taRifx)
@@ -44,11 +43,11 @@ LPI_pop <- LPI_pop %>%
   filter(points_per_pop1950_2005 >= 2)    #filtering out any population trends with fewer than 2 estimates between 1950 and 2005
   
 LPI_pop <- LPI_pop %>% 
-  dplyr::select(ID:Binomial, X1950:X2005)  #selecting out just the ID and the years we are interested in
+  dplyr::select(ID:Binomial, Latitude, Longitude,X1950:X2005)  #selecting out just the ID and the years we are interested in
 
 LPI_pop[LPI_pop == 'NULL'] <- NA
 
-#write.csv(LPI_pop, "populations_to_use.csv", row.names = FALSE)
+write.csv(LPI_pop, "populations_to_use.csv", row.names = FALSE)
 
 ```
 
@@ -56,69 +55,85 @@ Calculating lambdas
 
 ```{r}
 
+
 doFit <- function(sp_name) {
- 
-  ids <- LPI_pop %>% 
-    filter(ID == sp_name)
+ids <- LPI_pop %>%
+filter(ID == sp_name)
 
-  spid <- ids %>% 
-   dplyr::select(X1950:X2005)
-  
-  colnames(spid)<-1950:2005              #renaming the date column names as R doesn't like numbered column names
-  name <- ids$Binomial
-  id <- ids$ID
-  points <- ids$points_per_pop1950_2005
-  name_id <- paste(name, id, sep="_") #creating id for naming files of plots
-  Date <- as.numeric(colnames(spid))
-  spidt <- destring(t(spid))
-  time <- length(min(which(!is.na(spidt))):max(which(!is.na(spidt))))
-  missing <- time - points
-  
-  Year<-Date[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
-  Population<-spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
-  Population[Population == 0] <- mean(Population, na.rm=TRUE)*0.01 #if a population is zero one year thhis is replaced with 1% of the average population estimate - because you can log zeros
-  
-  df<-data.frame(Year,Population)
-  
-  if (sum(na.omit(df$Population < 1))>0) {
-    df$Population<-df$Population + 1
-  } 
-    
-  
-  if (points >=6) {           
-    PopN = log10(df$Population)
-    if (length(na.omit(PopN)) >=6) {
-      SmoothParm = round(length(na.omit(PopN))/2)    
-    } else {
-      SmoothParm=3
-    }
+spid <- ids %>%
+dplyr::select(X1950:X2005)
 
-    mg2<-mgcv:::gam(PopN ~ s(Year, k=SmoothParm), fx=TRUE)
-    pv2 <- predict(mg2,df,type="response",se=TRUE) 
-    R_sq2<-summary(mg2)$r.sq
-    model<-1
-    pv2$fit[pv2$fit <= 0] <- NA
-    lambda2<-diff(pv2$fit)
-    lambda_sum2<-sum(lambda2, na.rm=TRUE)
-    lambda_mean2<-mean(lambda2, na.rm=TRUE)
+colnames(spid) <-
+1950:2005              #renaming the date column names as R doesn't like numbered column names
+name <- ids$Binomial
+id <- ids$ID
+points <- ids$points_per_pop1950_2005
+name_id <-
+paste(name, id, sep = "_") #creating id for naming files of plots
+Date <- as.numeric(colnames(spid))
+# spidt <- destring(t(spid))
+spidt <- as.numeric(as.character(spid))
+time <-
+length(min(which(!is.na(spidt))):max(which(!is.na(spidt))))
+missing <- time - points
 
-  } else {
-    SmoothParm<-NA
-    PopN = log10(df$Population)
-    ml2<-lm(PopN~df$Year)
-    R_sq2<-summary(ml2)$r.sq
-    model<-0
-    Pop_interp2<-na.approx(PopN)
-    Pop_interp2[Pop_interp2<=0] <- NA
-    lambda2<-diff(Pop_interp2)
-    lambda_sum2<-sum(lambda2, na.rm=TRUE)
-    lambda_mean2<-mean(lambda2, na.rm=TRUE)
- 
-  }
+Year <- Date[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
+Population <-
+spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
+Population[Population == 0] <-
+mean(Population, na.rm = TRUE) * 0.01 #if a population is zero one year thhis is replaced with 1% of the average population estimate - because you can log zeros
 
-res_df = data.frame(sp_name=sp_name, points=points, SmoothParm=SmoothParm, r_sq=R_sq2, model=model,lambda_sum=lambda_sum2,lambda_mean=lambda_mean2,time=time, missing=missing)
+df <- data.frame(Year, Population)
 
-#print(res_df)
+if (sum(na.omit(df$Population < 1)) > 0) {
+df$Population <- df$Population + 1
+}
+
+
+if (points >= 6) {
+PopN = log10(df$Population)
+if (length(na.omit(PopN)) >= 6) {
+SmoothParm = round(length(na.omit(PopN)) / 2)
+} else {
+SmoothParm = 3
+}
+
+mg2 <- mgcv:::gam(PopN ~ s(Year, k = SmoothParm), fx = TRUE)
+pv2 <- predict(mg2, df, type = "response", se = TRUE)
+R_sq2 <- summary(mg2)$r.sq
+model <- 1
+pv2$fit[pv2$fit <= 0] <- NA
+lambda2 <- diff(pv2$fit)
+lambda_sum2 <- sum(lambda2, na.rm = TRUE)
+lambda_mean2 <- mean(lambda2, na.rm = TRUE)
+
+} else {
+SmoothParm <- NA
+PopN = log10(df$Population)
+ml2 <- lm(PopN ~ df$Year)
+R_sq2 <- summary(ml2)$r.sq
+model <- 0
+Pop_interp2 <- na.approx(PopN)
+Pop_interp2[Pop_interp2 <= 0] <- NA
+lambda2 <- diff(Pop_interp2)
+lambda_sum2 <- sum(lambda2, na.rm = TRUE)
+lambda_mean2 <- mean(lambda2, na.rm = TRUE)
+
+}
+
+res_df = data.frame(
+sp_name = sp_name,
+points = points,
+SmoothParm = SmoothParm,
+r_sq = R_sq2,
+model = model,
+lambda_sum = lambda_sum2,
+lambda_mean = lambda_mean2,
+time = time,
+missing = missing
+)
+
+print(res_df)
 return(res_df)
 }
 
@@ -136,7 +151,7 @@ write.csv(all_df, "Global_Population_Lambdas.csv", row.names = FALSE)
 Step 2 - Extracting the Climate data for each population
 
 ```{r, cache=TRUE}
-CR30s<-brick(here::here("climate_data","cru_ts3.23.1931.1940.tmp.dat.nc"))
+
 CR40s<-brick(here::here("climate_data","cru_ts3.23.1941.1950.tmp.dat.nc"))
 CR50s<-brick(here::here("climate_data","cru_ts3.23.1951.1960.tmp.dat.nc"))
 CR60s<-brick(here::here("climate_data","cru_ts3.23.1961.1970.tmp.dat.nc"))
@@ -144,19 +159,21 @@ CR70s<-brick(here::here("climate_data","cru_ts3.23.1971.1980.tmp.dat.nc"))
 CR80s<-brick(here::here("climate_data","cru_ts3.23.1981.1990.tmp.dat.nc"))
 CR90s<-brick(here::here("climate_data","cru_ts3.23.1991.2000.tmp.dat.nc"))
 CR00s<-brick(here::here("climate_data","cru_ts3.23.2001.2010.tmp.dat.nc"))
+
+
 ```
 
 Subsetting the data to exclude fish, populations in marine systems and those without specific locations
 ```{r, cache=TRUE}
 
-LPI <- read.csv("LPI_pops_20160523_edited.csv")
+LPI <- read.csv("populations_to_use.csv")
 
 all_df <- read.csv("Global_Population_Lambdas.csv", stringsAsFactors = FALSE)
 
 LPIsp <- LPI %>% 
   filter(LPI$ID %in% all_df$sp_name)
 
-CR<-stack(CR30s,CR40s,CR50s,CR60s,CR70s,CR80s,CR90s,CR00s)
+CR<-stack(CR40s[[97:120]],CR50s,CR60s,CR70s,CR80s,CR90s,CR00s[[1:72]])  #getting years from 1949 - 2006
 
 xy<-data.frame(LPIsp$Longitude, LPIsp$Latitude)
 
@@ -166,54 +183,83 @@ xy_df<-data.frame(xy)
 colnames(xy_df)<-c("lon", "lat")
 coordinates(xy_df) <- c("lon", "lat")
 
-```
-
-```{r}
-
-years <- rep(1931:2010, each = 12)
-
-annual_ras <- function(year, rast){
-    
-  ann_ras <- mean(rast[[which(years == year)]])
-  names(ann_ras) <-  paste0("Year_", year)
-  return(ann_ras)
-
-  }
-
-cr_out <- lapply(X = unique(years), FUN  = annual_ras, rast = CR)
-
-cr_st<- do.call(stack, cr_out)
+#xy_df <- xy_df[1:50,]
 
 ```
 
 ```{r}
+n<-2#number of cores to use - not sure how many I can go up to - 6 at UCL
+cl<-makeCluster(n)
+registerDoParallel(cl)  
+getDoParWorkers()
 
-mt_out <- raster::extract(cr_st, xy_df, nl = nlayers(cr_st))
+buff<- function (year,b)  {
+  
+  rasterex<-raster:::extract(CR[[year]], xy_df, buff=b, fun=mean, na.rm=TRUE)
+  return(rasterex)
+  
+}
 
-mt_df <- data.frame(xy_df@coords, mt_out, row.names = NULL)
+diam<-0 #size of buffer to use - in metres
+lyr<-1:nlayers(CR)
 
-melt_df <- melt(mt_df, id = c("lon", "lat"))
+stime <- system.time({
+  sr <- foreach(1, .combine = cbind) %dopar% mapply(buff,lyr,diam)
+})
+stime
 
-colnames(melt_df) <- c("Longitude", "Latitude", "Date", "Mean_T")
+stopCluster(cl)
+```
 
-#write.csv(melt_df, "Global_Mean_Temp.csv", row.names = FALSE)
+
+```{r}
+
+first <- gsub("X","",names(CR)[1])
+
+last <-  gsub("X","",names(CR)[length(names(CR))])
+  
+dates <- seq(ymd(first), ymd(last), by = 'months')
+
+datesr <- rep(dates, each=length(xy_df))   #each number should be number of pops
+
+srm <- melt(sr)
+
+lon <- xy_df@coords[,1]
+lat <- xy_df@coords[,2]
+
+srm2 <- cbind(lon,lat,datesr, srm)
+
+srm3 <- srm2[,c("lon","lat","datesr","value")]
+
+colnames(srm3) <- c("Longitude", "Latitude", "Date", "Mean_T")
+
+LPI_ID<-LPIsp[,c("ID", "Longitude", "Latitude")]
+
+LPIclim<-merge(srm3, LPI_ID, by=c("Longitude", "Latitude"))
+
+write.csv(LPIclim, "Global_Mean_Monthly_Temp.csv", row.names = FALSE)
 
 ```
 
 
 ```{r, cache=TRUE}
+
 LPI_pop <- read.csv("populations_to_use.csv")
 
 LPI_pop$ID <- as.integer(LPI_pop$ID)
 
-LPIclim <- read.csv("Global_Mean_Temp.csv", stringsAsFactors = FALSE)
+LPIclim <- vroom::vroom("Global_Mean_Monthly_Temp.csv")
   
-LPIclim$Year <- as.numeric(gsub("Year_","",LPIclim$Date))
+LPIclim$Year <- lubridate::year(LPIclim$Date)
 
 LPIclim <- LPIclim[complete.cases(LPIclim),]
 
-LPIclim <-merge(LPI_pop[,c("ID", "Binomial", "Longitude", "Latitude")], LPIclim, by = c("Longitude", "Latitude"))
+LPIclim <-merge(LPI_pop[,c("ID", "Binomial", "Longitude", "Latitude")], LPIclim, by = c("ID","Longitude", "Latitude"))
 
+
+LPIclim <- LPIclim %>% 
+  group_by(ID, Longitude, Latitude, Binomial,Year) %>% 
+  summarize(Mean_ann_T = mean(Mean_T))
 
 
 ```
@@ -229,11 +275,11 @@ doMean = function(sp_name) {
    dplyr::select(X1950:X2005)
   
   colnames(spid)<-1950:2005              #renaming the date column names as R doesn't like numbered column names
-  nid <- matrix(rep (NA, 10), nrow=1)                
-  colnames(nid) <- 1940:1949
-  spid <- cbind(nid, spid)#renaming the date column names as R doesn't like numbered column names
+  # nid <- matrix(rep (NA, 10), nrow=1)                
+  # colnames(nid) <- 1940:1949
+  # spid <- cbind(nid, spid)#renaming the date column names as R doesn't like numbered column names
   climid <- LPIclim %>% 
-    filter(ID == sp_name, Year >=  1940 & Year <= 2005) %>% 
+    filter(ID == sp_name, Year >=  1950 & Year <= 2005) %>% 
     arrange(Year)#subsetting the climate data by each population
   
   name <- spid2$Binomial
@@ -242,13 +288,14 @@ doMean = function(sp_name) {
   Date <- as.numeric(colnames(spid))
   spidt <- destring(t(spid))
   mean_change <- NA
+  mean_df <- data.frame()
   
   if (any(!is.na(spidt))){
     
   Year <- Date[(min(which(!is.na(spidt)))):max(which(!is.na(spidt)))]
   Population <- spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
 
-  Mean <- climid$Mean_T[(min(which(!is.na(spidt)))):max(which(!is.na(spidt)))]
+  Mean <- climid$Mean_ann_T[(min(which(!is.na(spidt)))):max(which(!is.na(spidt)))]
   
   mean_change<-sum(diff(Mean))
 
@@ -271,7 +318,7 @@ doMean = function(sp_name) {
   return(mean_df)
 }
 
-all_df_list <- lapply(unique(LPI_pop$ID), doMean)
+all_df_list <- lapply(unique(LPIclim$ID), doMean)
 
 
 ```
@@ -281,7 +328,7 @@ all_df_list <- lapply(unique(LPI_pop$ID), doMean)
 mean_df <- do.call(rbind, all_df_list)
 colnames(mean_df) <- c("ID", "Sum_Mean_Change","Term","Estimate","SE","Statistic","p.val")
 
-#write.csv(mean_df, "Mean_Temp_Change_LPI_pops.csv", row.names = FALSE)
+write.csv(mean_df, "Mean_Temp_Change_LPI_pops.csv", row.names = FALSE)
 
 ```
 
@@ -316,13 +363,13 @@ gras2005<-raster(here::here("hyde_data","gras2005AD.asc"))
 
 
 rlist<-list(crop1940,crop1950,crop1960,crop1970,crop1980,crop1990,crop2000,crop2005,gras1940,gras1950,gras1960,gras1970,gras1980,gras1990,gras2000,gras2005)
-cellareas <- DegreeCellAreaKM(lat=coordinates(crop1940)[,2],height=res(crop1940)[2],width=res(crop1940)[1])
+cellareas <- area(rlist[[1]])
 
 for (map in rlist){
   
-  map_pcnt<-signif(values(map),digits=4)/cellareas
-  map_pcnt_m<-matrix(map_pcnt, nrow=nrow(map), ncol=ncol(map), byrow=TRUE)
-  map_pcnt_r<-raster(map_pcnt_m, xmn=map@extent[1], xmx=map@extent[2], ymn=map@extent[3], ymx=map@extent[4])
+  map_pcnt <- signif(values(map),digits=4)/cellareas
+  map_pcnt_m <- matrix(map_pcnt, nrow=nrow(map), ncol=ncol(map), byrow=TRUE)
+  map_pcnt_r <- raster(map_pcnt_m, xmn=map@extent[1], xmx=map@extent[2], ymn=map@extent[3], ymx=map@extent[4])
   writeRaster(map_pcnt_r, here::here("hyde_data", paste0(names(map),"_raster.tif")),overwrite=TRUE)
   print(names(map))
 }
@@ -371,11 +418,18 @@ grid_crop2[grid_crop2 == 'NULL'] <- NA
 
 for (i in 1:length(grid_crop2$ID)){
   
-  ID <- grid_crop2[i,1]
+  id <- grid_crop2[i,1]
   Binomial <- as.character(grid_crop2[i,6])
-  spid <- grid_crop2[i,69:124]                     #subsetting only the dates
+  spid <- grid_crop2 %>% 
+    filter(ID == id) %>% 
+    dplyr::select("X1950":"X2005")
   colnames(spid) <- 1950:2005
   
+  crop_change <- NA
+  gras_change <- NA
+  both_change <- NA
+  both_sum <- NA
+    
   if(any(!is.na(spid))){
     
   Date <- as.numeric(colnames(spid))
@@ -416,35 +470,31 @@ for (i in 1:length(grid_crop2$ID)){
   
   if (min_yr != max_yr & min_yr < 2005 & sum(is.na(Yr_intrp_crop$mean_crop))<60) {
     
-    Yr_intrp_crop$mean_crop_int<-na.approx(Yr_intrp_crop$mean_crop)
-    Yr_intrp_gras$mean_gras_int<-na.approx(Yr_intrp_gras$mean_grass)
-    Yr_intrp_crop$both<-Yr_intrp_crop$mean_crop_int + Yr_intrp_gras$mean_gras_int
+    Yr_intrp_crop$mean_crop_int <- na.approx(Yr_intrp_crop$mean_crop)
+    Yr_intrp_gras$mean_gras_int <- na.approx(Yr_intrp_gras$mean_grass)
+    Yr_intrp_crop$both <- Yr_intrp_crop$mean_crop_int + Yr_intrp_gras$mean_gras_int
     
-    crop_change<-mean(diff(subset(Yr_intrp_crop, Year >= min_yr & Year <= max_yr)$mean_crop_int))
-    gras_change<-mean(diff(subset(Yr_intrp_gras, Year >= min_yr & Year <= max_yr)$mean_gras_int))
-    both_change<-mean(diff(subset(Yr_intrp_crop, Year >= min_yr & Year <= max_yr)$both))
-    both_sum<-sum(diff(subset(Yr_intrp_crop, Year >= min_yr & Year <= max_yr)$both))
-    }
-  } else {
-    crop_change<-NA
-    gras_change<-NA
-    both_change<-NA
-    both_sum<-NA
+    crop_change <- mean(diff(subset(Yr_intrp_crop, Year >= min_yr & Year <= max_yr)$mean_crop_int))
+    gras_change <- mean(diff(subset(Yr_intrp_gras, Year >= min_yr & Year <= max_yr)$mean_gras_int))
+    both_change <- mean(diff(subset(Yr_intrp_crop, Year >= min_yr & Year <= max_yr)$both))
+    both_sum <- sum(diff(subset(Yr_intrp_crop, Year >= min_yr & Year <= max_yr)$both))
+  } 
+
   }
   
-  years<-max(Year)-min(Year)
-  final<-cbind(ID,Binomial,crop_change, gras_change, both_change, both_sum, years) 
-  result<-rbind(final,result)
+  years <- max(Year)-min(Year)
+  final <- cbind(id,Binomial,crop_change, gras_change, both_change, both_sum, years) 
+  result <- rbind(final,result)
   print(final)
   
 }
 
-#write.csv(result, "HYDE_LPI_rate_of_change.csv")
+write.csv(result, "HYDE_LPI_rate_of_change.csv", row.names = FALSE)
 
 ```
 
 ```{r, cache=TRUE, warning=FALSE}
-lpi <- read.csv("LPI_pops_20160523_edited.csv")
+lpi <- read.csv("populations_to_use.csv")
 bm <- read.csv("Amniote_Database_Aug_2015.csv")
 bm$Binomial <- paste(bm$genus, bm$species, sep="_")
 
@@ -457,101 +507,88 @@ lpibm$Log_Body_Mass_g <- log10(lpibm$Body_mass_g)
 
 lpibm2 <- lpibm[lpibm$Body_mass_g !=-999,]
 
-
 lpibm2 <- unique(lpibm2)
 
 lpibm2$Log_Body_Mass_g <- log10(lpibm2$Body_mass_g)
 
-#write.csv(lpibm2, "LPI_BodyMass_Amniote_Database.csv")
+write.csv(lpibm2, "LPI_BodyMass_Amniote_Database.csv", row.names = FALSE)
 
 ```
 
 Setting up the modelling
 
-```{r, cache=TRUE, warning=FALSE, message=FALSE}
+```{r, warning=FALSE, message=FALSE}
 
-temp<-read.csv("All_LPI_All_Years_Nobuff_1931_moreLPI_end2005.csv")
+#temp <- read.csv("Mean_Temp_Change_LPI_pops.csv", stringsAsFactors = FALSE)
+temp <- read.csv("All_LPI_All_Years_Nobuff_1931_moreLPI_end2005.csv")
+bm <- read.csv("LPI_BodyMass_Amniote_Database.csv", stringsAsFactors = FALSE)
+bm <- bm[,-3]
 
-body4<-read.csv("LPI_BodyMass_Amniote_Database.csv")
+hyde <- read.csv("HYDE_LPI_rate_of_change.csv", stringsAsFactors = FALSE)
+hyde <- hyde %>% 
+  dplyr::select(-"Binomial")
 
-body4<-body4[,-3]
-hyde<-read.csv("Hyde_crop_pasture_annual_change.csv")
+temp <- temp %>% 
+  dplyr::select("ID", "Estimate")
 
-hyde2<-read.csv("Hyde_crop_pasture_annual_change_sum.csv")
+#temp <- merge(temp, hyde[,c(2,3)], by.x = "ID", by.y = "id")
 
-temp<-temp[,c("ID", "Estimate")]
-temp<-merge(temp, hyde[,c(2,3)], by="ID")
+LPI <- read.csv("LPI_pops_20160523_edited.csv")
 
-LPI<-read.csv("LPI_pops_20160523_edited.csv")
+pop <- read.csv("Global_Population_Lambdas.csv")
 
-pop<-read.csv("Global_Population_Trends_Rsq_Lambda_07_10_16.csv")
+pop <- pop %>% 
+  rename(ID = sp_name)
 
+LPI <- LPI %>% 
+  dplyr::select("ID","Binomial","Common_name", "Order","Family", "Protected_status", "Country","Region", "System", "Class","Specific_location", "Longitude", "Latitude", "Primary_threat", "Secondary_threat", "Tertiary_threat", "Migratory", "Forest")
 
+df <- merge(merge(temp,bm, by="ID"), merge(LPI, pop, by="ID"),by = c("ID", "Binomial"))
 
-LPI<-LPI[,c("ID","Binomial","Common_name", "Order","Family", "Protected_status", "Country","Region", "System", "Class","Specific_location", "Longitude", "Latitude", "Primary_threat", "Secondary_threat", "Tertiary_threat", "Migratory", "Forest")]
+dfd <- merge(df, hyde, by.y = "id", by.x = "ID")
 
-df<-merge(merge(temp,body4[,c(2:4)], by="Binomial"), merge(LPI, pop, by="ID"),by="ID")
+df2 <- dfd %>% 
+  filter(!is.na(Estimate) & r_sq >= 0.4999999  & time >= 5 & System!="Marine" 
+        & Specific_location == 1 & !is.na(both_change) & !is.na(Log_Body_Mass_g) & Class=="Aves")
 
-
-dfd<-merge(df, hyde[,c(-1,-3)], by="ID")
-
-head(dfd)
-
-nrow(df)
-nrow(dfd) 
-dfu<-unique(dfd)
-
-df2<-subset(dfu, !is.na(Estimate) & r_sq >= 0.4999999  &length_time >=5& System!="Marine" 
-            &Specific_location == 1 &!is.na(both_change) & !is.na(Log_Body_Mass_g)& Class=="Aves")
 nrow(df2)
 
 table(df2$Protected_status)
 df2$Protected_status[df2$Protected_status == "No (large survey area)"]<-"No"
 df2$Protected_status[df2$Protected_status == "No (area surrounding PA)"]<-"No"
 
-colnames(df2)[2]<-"Binomial"
+```
 
-#df2[is.na(df2$lambda_mean),]$lambda_mean<-0
+```{r}
 
-nrow(df2)
+sp_dups <- df2 %>% 
+  group_by(Longitude, Latitude) %>% 
+  summarise(n = n()) 
 
-#write.csv(df2, "mammal_data_for_prediction.csv")
+sp_dups$loc_id <- 1:length(sp_dups$Longitude)
 
-library(plyr)
-sp_dups<-data.frame(ddply(df2,.(Longitude,Latitude),nrow))
-sp_dups$loc_id<-1:length(sp_dups$Longitude)
 sp_dups_df<-merge(sp_dups, df2, by=c("Longitude","Latitude"))
 
-library(data.table)
-dt = as.data.table(sp_dups_df)
+parm_df <- sp_dups_df %>% 
+  dplyr::select("ID","Estimate", "both_change", "Log_Body_Mass_g")
 
-parm_df<-sp_dups_df[,c("ID","Estimate", "both_change", "Log_Body_Mass_g")]  ##ID, land use, and climate  use "LUC_dist" or "Nat_change" for purely annual change in summed primary, secondary and other
+parm_scale <- scale(parm_df[,c("Estimate", "both_change", "Log_Body_Mass_g")])       #use the scaling factors at the bottom of these to scale the rasters
 
-parm_mat<-as.matrix(parm_df)
-parm_scale<-scale(parm_mat[,c("Estimate", "both_change", "Log_Body_Mass_g")])       #use the scaling factors at the bottom of these to scale the rasters
+parm_id <- parm_df[,"ID"]
 
-parm_id<-parm_mat[,"ID"]
+parm_df_scale <- data.frame(parm_id,parm_scale)
 
-parm_df_scale<-data.frame(parm_id,parm_scale)
+colnames(parm_df_scale) <- c("ID","mean_slope_scale", "change_rate_scale", "Bodymass_scale")
 
-colnames(parm_df_scale)<-c("ID","mean_slope_scale", "change_rate_scale", "Bodymass_scale")
-
-sp_df_scale<-merge(sp_dups_df, parm_df_scale, by="ID")
-
-dt<-data.table(sp_df_scale)
-
-length(unique(dt$loc_id))
+dt <- merge(sp_dups_df, parm_df_scale, by="ID")
 
 nrow(dt)
-
-#write.csv(dt, "Mammals_scaled_ready_for_models.csv")
 ```
 
 
 ```{r, cache=TRUE, warning=FALSE, message=FALSE}
 source("rsquaredglmm.R")
 
-  library(lme4) 
   
   m0<-lmer(lambda_mean ~ change_rate_scale+mean_slope_scale+change_rate_scale:mean_slope_scale+Bodymass_scale+(1|Binomial)+(1|loc_id),data=dt, REML=F)
   m0f<-lmer(lambda_mean ~ change_rate_scale+mean_slope_scale+change_rate_scale:mean_slope_scale+Bodymass_scale+Protected_status+(1|Binomial)+(1|loc_id),data=dt, REML=F)
@@ -627,12 +664,12 @@ Model Comparison
   
 
   coef_pcnt$Var_name<-rownames(coef_pcnt)
-  library(plotrix)
-  
-  plotCI(1:5, y=coef_pcnt$coef_av, ui=coef_pcnt$highCI, li=coef_pcnt$lowCI, ylab="Annual Population Change (%)", xlab="" ,xaxt = "n", 
-         main="Birds", lwd=1, ylim=c(min(coef_pcnt$lowCI*1.1), max(coef_pcnt$highCI*1.2)))
-  axis(1, at=1:5, labels=rownames(coef_pcnt), las=2)
-  abline(h=0, col="red", lty =2)
+  # library(plotrix)
+  # 
+  # plotCI(1:5, y=coef_pcnt$coef_av, ui=coef_pcnt$highCI, li=coef_pcnt$lowCI, ylab="Annual Population Change (%)", xlab="" ,xaxt = "n", 
+  #        main="Birds", lwd=1, ylim=c(min(coef_pcnt$lowCI*1.1), max(coef_pcnt$highCI*1.2)))
+  # axis(1, at=1:5, labels=rownames(coef_pcnt), las=2)
+  # abline(h=0, col="red", lty =2)
 
   #AIC
   AICs<-c(AIC(m0),AIC(m0a),AIC(m0b),AIC(m0c),AIC(m0d),AIC(m1),AIC(m1a),AIC(m1b),AIC(m1c),AIC(mnull))
