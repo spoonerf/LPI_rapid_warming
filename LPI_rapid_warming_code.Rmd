@@ -28,7 +28,7 @@ Subsetting the data to exclude fish, populations in marine systems and those wit
 LPI <- read.csv("LPI_pops_20160523_edited.csv")
 
 LPI_pop <- LPI %>% 
-  filter(Specific_location==1 & System !="Marine" & Class != "Actinopterygii"& Class != "Cephalaspidomorphi")
+  filter(Specific_location == 1 & System !="Marine" & Class != "Actinopterygii"& Class != "Cephalaspidomorphi")
 
 pop_data <- LPI_pop %>% 
   dplyr::select(ID, X1950:X2005)  #selecting out just the ID and the years we are interested in
@@ -57,80 +57,77 @@ Calculating lambdas
 
 
 doFit <- function(sp_name) {
-ids <- LPI_pop %>%
-filter(ID == sp_name)
+  
+  ids <- LPI_pop %>%
+    filter(ID == sp_name)
 
-spid <- ids %>%
-dplyr::select(X1950:X2005)
+  spid <- ids %>%
+    dplyr::select(X1950:X2005)
 
-colnames(spid) <-
-1950:2005              #renaming the date column names as R doesn't like numbered column names
-name <- ids$Binomial
-id <- ids$ID
-points <- ids$points_per_pop1950_2005
-name_id <-
-paste(name, id, sep = "_") #creating id for naming files of plots
-Date <- as.numeric(colnames(spid))
-# spidt <- destring(t(spid))
-spidt <- as.numeric(as.character(spid))
-time <-
-length(min(which(!is.na(spidt))):max(which(!is.na(spidt))))
-missing <- time - points
+  colnames(spid) <- 1950:2005              #renaming the date column names as R doesn't like numbered column names
+  name <- ids$Binomial
+  id <- ids$ID
+  points <- ids$points_per_pop1950_2005
+  name_id <- paste(name, id, sep = "_") #creating id for naming files of plots
+  Date <- as.numeric(colnames(spid))
+  spidt <- destring(t(spid))
+  #spidt <- as.numeric(as.character(spid))
+  time <- length(min(which(!is.na(spidt))):max(which(!is.na(spidt))))
+  missing <- time - points
 
-Year <- Date[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
-Population <-
-spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
-Population[Population == 0] <-
-mean(Population, na.rm = TRUE) * 0.01 #if a population is zero one year thhis is replaced with 1% of the average population estimate - because you can log zeros
+  Year <- Date[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
+  Population <- spidt[min(which(!is.na(spidt))):max(which(!is.na(spidt)))]
+  Population[Population == 0] <- mean(Population, na.rm = TRUE) * 0.01 #if a population is zero one year thhis is replaced with 1% of the average population estimate - because you can log zeros
 
-df <- data.frame(Year, Population)
+  df <- data.frame(Year, Population)
 
-if (sum(na.omit(df$Population < 1)) > 0) {
-df$Population <- df$Population + 1
-}
+  if (sum(na.omit(df$Population < 1)) > 0) {
+    df$Population <- df$Population + 1
+  }
 
+  PopN = log10(df$Population)
 
-if (points >= 6) {
-PopN = log10(df$Population)
-if (length(na.omit(PopN)) >= 6) {
-SmoothParm = round(length(na.omit(PopN)) / 2)
-} else {
-SmoothParm = 3
-}
-
-mg2 <- mgcv:::gam(PopN ~ s(Year, k = SmoothParm), fx = TRUE)
-pv2 <- predict(mg2, df, type = "response", se = TRUE)
-R_sq2 <- summary(mg2)$r.sq
-model <- 1
-pv2$fit[pv2$fit <= 0] <- NA
-lambda2 <- diff(pv2$fit)
-lambda_sum2 <- sum(lambda2, na.rm = TRUE)
-lambda_mean2 <- mean(lambda2, na.rm = TRUE)
-
-} else {
-SmoothParm <- NA
-PopN = log10(df$Population)
-ml2 <- lm(PopN ~ df$Year)
-R_sq2 <- summary(ml2)$r.sq
-model <- 0
-Pop_interp2 <- na.approx(PopN)
-Pop_interp2[Pop_interp2 <= 0] <- NA
-lambda2 <- diff(Pop_interp2)
-lambda_sum2 <- sum(lambda2, na.rm = TRUE)
-lambda_mean2 <- mean(lambda2, na.rm = TRUE)
-
-}
-
-res_df = data.frame(
-sp_name = sp_name,
-points = points,
-SmoothParm = SmoothParm,
-r_sq = R_sq2,
-model = model,
-lambda_sum = lambda_sum2,
-lambda_mean = lambda_mean2,
-time = time,
-missing = missing
+  if (points >= 6) {
+    if (length(na.omit(PopN)) >= 6) {
+      SmoothParm = round(length(na.omit(PopN)) / 2)
+    } else {
+      SmoothParm = 3
+    }
+  
+      mg2 <- mgcv:::gam(PopN ~ s(Year, k = SmoothParm), fx = TRUE)
+      pv2 <- predict(mg2, df, type = "response", se = TRUE)
+      R_sq2 <- summary(mg2)$r.sq
+      model <- 1
+      #pv2$fit[pv2$fit <= 0] <- NA
+      lambda2 <- diff(pv2$fit)
+      lambda_sum2 <- sum(lambda2, na.rm = TRUE)
+      lambda_mean2 <- mean(lambda2, na.rm = TRUE)
+  
+    } else {
+    
+      SmoothParm <- NA
+      PopN = log10(df$Population)
+      ml2 <- lm(PopN ~ df$Year)
+      R_sq2 <- summary(ml2)$r.sq
+      model <- 0
+      Pop_interp2 <- na.approx(PopN)
+      #Pop_interp2[Pop_interp2 <= 0] <- NA
+      lambda2 <- diff(Pop_interp2)
+      lambda_sum2 <- sum(lambda2, na.rm = TRUE)
+      lambda_mean2 <- mean(lambda2, na.rm = TRUE)
+  
+  }
+  
+    res_df = data.frame(
+    sp_name = sp_name,
+    points = points,
+    SmoothParm = SmoothParm,
+    r_sq = R_sq2,
+    model = model,
+    lambda_sum = lambda_sum2,
+    lambda_mean = lambda_mean2,
+    time = time,
+    missing = missing
 )
 
 print(res_df)
@@ -144,7 +141,7 @@ all_df_list <- lapply(unique(LPI_pop$ID), doFit)
 ```{r, cache=TRUE}
 all_df <- do.call(rbind, all_df_list)
 
-write.csv(all_df, "Global_Population_Lambdas.csv", row.names = FALSE)
+write.csv(all_df, "Global_Population_Lambdas_new.csv", row.names = FALSE)
 
 ```
 
