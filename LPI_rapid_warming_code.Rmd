@@ -141,7 +141,7 @@ all_df_list <- lapply(unique(LPI_pop$ID), doFit)
 ```{r, cache=TRUE}
 all_df <- do.call(rbind, all_df_list)
 
-write.csv(all_df, "Global_Population_Lambdas_new.csv", row.names = FALSE)
+write.csv(all_df, "Global_Population_Lambdas.csv", row.names = FALSE)
 
 ```
 
@@ -180,64 +180,29 @@ xy_df<-data.frame(xy)
 colnames(xy_df)<-c("lon", "lat")
 coordinates(xy_df) <- c("lon", "lat")
 
-#xy_df <- xy_df[1:50,]
-
 ```
 
 ```{r}
-n<-2#number of cores to use - not sure how many I can go up to - 6 at UCL
-cl<-makeCluster(n)
-registerDoParallel(cl)  
-getDoParWorkers()
-
-buff<- function (year,b)  {
-  
-  rasterex<-raster:::extract(CR[[year]], xy_df, buff=b, fun=mean, na.rm=TRUE)
-  return(rasterex)
-  
+years <- rep(1949:2006, each = 12)
+annual_ras <- function(year, rast){
+    
+  ann_ras <- mean(rast[[which(years == year)]])
+  names(ann_ras) <-  paste0("Year_", year)
+  return(ann_ras)
 }
 
-diam<-0 #size of buffer to use - in metres
-lyr<-1:nlayers(CR)
+cr_out <- lapply(X = unique(years), FUN  = annual_ras, rast = CR)
 
-stime <- system.time({
-  sr <- foreach(1, .combine = cbind) %dopar% mapply(buff,lyr,diam)
-})
-stime
-
-stopCluster(cl)
+cr_st<- do.call(stack, cr_out)
 ```
-
 
 ```{r}
-
-first <- gsub("X","",names(CR)[1])
-
-last <-  gsub("X","",names(CR)[length(names(CR))])
-  
-dates <- seq(ymd(first), ymd(last), by = 'months')
-
-datesr <- rep(dates, each=length(xy_df))   #each number should be number of pops
-
-srm <- melt(sr)
-
-lon <- xy_df@coords[,1]
-lat <- xy_df@coords[,2]
-
-srm2 <- cbind(lon,lat,datesr, srm)
-
-srm3 <- srm2[,c("lon","lat","datesr","value")]
-
-colnames(srm3) <- c("Longitude", "Latitude", "Date", "Mean_T")
-
-LPI_ID<-LPIsp[,c("ID", "Longitude", "Latitude")]
-
-LPIclim<-merge(srm3, LPI_ID, by=c("Longitude", "Latitude"))
-
-write.csv(LPIclim, "Global_Mean_Monthly_Temp.csv", row.names = FALSE)
-
+mt_out <- raster::extract(cr_st, xy_df, nl = nlayers(cr_st))
+mt_df <- data.frame(xy_df@coords, mt_out, row.names = NULL)
+melt_df <- melt(mt_df, id = c("lon", "lat"))
+colnames(melt_df) <- c("Longitude", "Latitude", "Date", "Mean_T")
+write.csv(melt_df, "Global_Mean_Temp.csv", row.names = FALSE)
 ```
-
 
 ```{r, cache=TRUE}
 
