@@ -510,14 +510,15 @@ df <- merge(merge(temp,bm, by="ID"), merge(LPI, pop, by="ID"),by = c("ID", "Bino
 dfd <- merge(df, hyde, by.y = "id", by.x = "ID")
 
 df2 <- dfd %>% 
-  filter(!is.na(Estimate) & r_sq >= 0.4999999  & time >= 5 & System!="Marine" 
-        & Specific_location == 1 & !is.na(both_change) & !is.na(Log_Body_Mass_g) & Class=="Aves")
+  filter(!is.na(Estimate) & r_sq >= 0.4999999  & time >= 5 & System!="Marine" & Specific_location == 1 & !is.na(both_change)& !is.na(Log_Body_Mass_g) & Protected_status != "Unknown" & Protected_status != "Both" & Class=="Mammalia" ) %>% 
+  group_by(Binomial, Latitude, Longitude, Estimate) %>% 
+  filter(n() == 1)
 
-nrow(df2)
 
 table(df2$Protected_status)
 df2$Protected_status[df2$Protected_status == "No (large survey area)"]<-"No"
 df2$Protected_status[df2$Protected_status == "No (area surrounding PA)"]<-"No"
+
 
 ```
 
@@ -588,8 +589,8 @@ Model Comparison
   library(lme4)  
 
   #msAICc <- model.sel(m1,m1a,m1b,m1c,mnull)
-  #msAICc <- model.sel(m0,m0a,m0b,m0c,m0d,m1,m1a,m1b,m1c,m0f,m0af,m0bf,m0cf,m0df,m1f,m1af,m1bf,m1cf,mnull)  
-  msAICc <- model.sel(m0,m0a,m0b,m0c,m0d,m1,m1a,m1b,m1c,mnull)
+  msAICc <- model.sel(m0,m0a,m0b,m0c,m0d,m1,m1a,m1b,m1c,m0f,m0af,m0bf,m0cf,m0df,m1f,m1af,m1bf,m1cf,mnull)  
+  #msAICc <- model.sel(m0,m0a,m0b,m0c,m0d,m1,m1a,m1b,m1c,mnull)
 
   msAICc$model<-rownames(msAICc)
   msAICc<-data.frame(msAICc)
@@ -598,8 +599,8 @@ Model Comparison
   AIC(m0,m0a,m0b,m0c,m1,m1a,m1b,m1c,mnull,m0f,m0af,m0bf,m0cf,m0df,m1f,m1af,m1bf,m1cf)
   
   #Rsq
-  #models_list<-list(m0,m0a,m0b,m0c,m0d,m1,m1a,m1b,m1c,mnull,m0f,m0af,m0bf,m0cf,m0df,m1f,m1af,m1bf,m1cf)
-  models_list<-list(m0,m0a,m0b,m0c,m0d,m1,m1a,m1b,m1c,mnull)
+  models_list<-list(m0,m0a,m0b,m0c,m0d,m1,m1a,m1b,m1c,mnull,m0f,m0af,m0bf,m0cf,m0df,m1f,m1af,m1bf,m1cf)
+  #models_list<-list(m0,m0a,m0b,m0c,m0d,m1,m1a,m1b,m1c,mnull)
   modelsR<-lapply(models_list,rsquared.glmm)
   modelsRsq <- matrix(unlist(modelsR), ncol=6, byrow=T)
   rownames(modelsRsq)<-c("m0","m0a","m0b","m0c","m0d","m1","m1a","m1b","m1c","mnull")
@@ -624,3 +625,5 @@ Model Comparison
   coef_pcnt<-data.frame(((10^coef_df) - 1)*100)
   coef_pcnt
 ```
+
+
