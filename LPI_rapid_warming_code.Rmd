@@ -1,7 +1,7 @@
 ---
-title: "Chapter One Workflow"
+title: "Spooner, Pearson and Freeman (2018)"
 author: "Fiona Spooner"
-date: "19 October 2017"
+date: Sys.Date()
 output: html_document
 ---
 
@@ -19,13 +19,15 @@ library(raster)
 library(reshape2)
 library(taRifx)
 library(zoo)
+library(ggplot2)
+library(rgdal)
 ```
 
 Subsetting the data to exclude fish, populations in marine systems and those without specific locations
 
 ```{r, cache=TRUE}
 
-LPI <- read.csv("LPI_pops_20160523_edited.csv")
+LPI <- read.csv(here("data","LPI_pops_20160523_edited.csv"))
 
 LPI_pop <- LPI %>% 
   filter(Specific_location == 1 & System !="Marine" & Class != "Actinopterygii"& Class != "Cephalaspidomorphi")
@@ -47,7 +49,7 @@ LPI_pop <- LPI_pop %>%
 
 LPI_pop[LPI_pop == 'NULL'] <- NA
 
-write.csv(LPI_pop, "populations_to_use.csv", row.names = FALSE)
+write.csv(LPI_pop, here("data","populations_to_use.csv"), row.names = FALSE)
 
 ```
 
@@ -130,7 +132,7 @@ doFit <- function(sp_name) {
     missing = missing
 )
 
-print(res_df)
+
 return(res_df)
 }
 
@@ -141,7 +143,7 @@ all_df_list <- lapply(unique(LPI_pop$ID), doFit)
 ```{r, cache=TRUE}
 all_df <- do.call(rbind, all_df_list)
 
-write.csv(all_df, "Global_Population_Lambdas.csv", row.names = FALSE)
+write.csv(all_df, here("data", "Global_Population_Lambdas.csv"), row.names = FALSE)
 
 ```
 
@@ -149,13 +151,13 @@ Step 2 - Extracting the Climate data for each population
 
 ```{r, cache=TRUE}
 
-CR40s<-brick(here::here("climate_data","cru_ts3.23.1941.1950.tmp.dat.nc"))
-CR50s<-brick(here::here("climate_data","cru_ts3.23.1951.1960.tmp.dat.nc"))
-CR60s<-brick(here::here("climate_data","cru_ts3.23.1961.1970.tmp.dat.nc"))
-CR70s<-brick(here::here("climate_data","cru_ts3.23.1971.1980.tmp.dat.nc"))
-CR80s<-brick(here::here("climate_data","cru_ts3.23.1981.1990.tmp.dat.nc"))
-CR90s<-brick(here::here("climate_data","cru_ts3.23.1991.2000.tmp.dat.nc"))
-CR00s<-brick(here::here("climate_data","cru_ts3.23.2001.2010.tmp.dat.nc"))
+CR40s<-brick(here::here("data","cru_ts3.23.1941.1950.tmp.dat.nc"))
+CR50s<-brick(here::here("data","cru_ts3.23.1951.1960.tmp.dat.nc"))
+CR60s<-brick(here::here("data","cru_ts3.23.1961.1970.tmp.dat.nc"))
+CR70s<-brick(here::here("data","cru_ts3.23.1971.1980.tmp.dat.nc"))
+CR80s<-brick(here::here("data","cru_ts3.23.1981.1990.tmp.dat.nc"))
+CR90s<-brick(here::here("data","cru_ts3.23.1991.2000.tmp.dat.nc"))
+CR00s<-brick(here::here("data","cru_ts3.23.2001.2010.tmp.dat.nc"))
 
 
 ```
@@ -163,9 +165,9 @@ CR00s<-brick(here::here("climate_data","cru_ts3.23.2001.2010.tmp.dat.nc"))
 Subsetting the data to exclude fish, populations in marine systems and those without specific locations
 ```{r, cache=TRUE}
 
-LPI <- read.csv("populations_to_use.csv")
+LPI <- read.csv(here("data","populations_to_use.csv"))
 
-all_df <- read.csv("Global_Population_Lambdas.csv", stringsAsFactors = FALSE)
+all_df <- read.csv(here("data","Global_Population_Lambdas.csv"), stringsAsFactors = FALSE)
 
 LPIsp <- LPI %>% 
   filter(LPI$ID %in% all_df$sp_name)
@@ -181,6 +183,7 @@ colnames(xy_df)<-c("lon", "lat")
 coordinates(xy_df) <- c("lon", "lat")
 
 ```
+
 
 ```{r}
 years <- rep(1949:2006, each = 12)
@@ -201,30 +204,31 @@ mt_out <- raster::extract(cr_st, xy_df, nl = nlayers(cr_st))
 mt_df <- data.frame(xy_df@coords, mt_out, row.names = NULL)
 melt_df <- melt(mt_df, id = c("lon", "lat"))
 colnames(melt_df) <- c("Longitude", "Latitude", "Date", "Mean_T")
-write.csv(melt_df, "Global_Mean_Temp.csv", row.names = FALSE)
+write.csv(melt_df, here("data","Global_Mean_Temp.csv"), row.names = FALSE)
 ```
 
 ```{r, cache=TRUE}
 
-LPI_pop <- read.csv("populations_to_use.csv")
+LPI_pop <- read.csv(here("data","populations_to_use.csv"))
 
 LPI_pop$ID <- as.integer(LPI_pop$ID)
 
-LPIclim <- vroom::vroom("Global_Mean_Monthly_Temp.csv")
+LPIclim <- read.csv(here("data","Global_Mean_Temp.csv"))
   
-LPIclim$Year <- lubridate::year(LPIclim$Date)
+#LPIclim$Year <- lubridate::year(LPIclim$Date)
 
 LPIclim <- LPIclim[complete.cases(LPIclim),]
 
-LPIclim <-merge(LPI_pop[,c("ID", "Binomial", "Longitude", "Latitude")], LPIclim, by = c("ID","Longitude", "Latitude"))
+LPIclim <-merge(LPI_pop[,c("ID", "Binomial", "Longitude", "Latitude")], LPIclim, by = c("Longitude", "Latitude"))
 
 
 LPIclim <- LPIclim %>% 
+  mutate(Year = as.numeric(gsub("Year_","", Date))) %>% 
   group_by(ID, Longitude, Latitude, Binomial,Year) %>% 
   summarize(Mean_ann_T = mean(Mean_T))
-
-
+  
 ```
+
 
 ```{r, cache=TRUE}
 
@@ -276,7 +280,7 @@ doMean = function(sp_name) {
     #mean_df<-data.frame(mean_df)
   }
   
-  print(sp_name)  
+  #print(sp_name)  
   return(mean_df)
 }
 
@@ -286,42 +290,43 @@ all_df_list <- lapply(unique(LPIclim$ID), doMean)
 ```
 
 
+
+
 ```{r, cache=TRUE}
 mean_df <- do.call(rbind, all_df_list)
 colnames(mean_df) <- c("ID", "Sum_Mean_Change","Term","Estimate","SE","Statistic","p.val")
 
-write.csv(mean_df, "Mean_Temp_Change_LPI_pops.csv", row.names = FALSE)
+write.csv(mean_df, here("data","Mean_Temp_Change_LPI_pops.csv"), row.names = FALSE)
 
 ```
-
 
 Calculating rates of land use change
 
 ```{r, warning=FALSE, message=FALSE}
 
-crop1940<-raster(here::here("hyde_data","crop1940AD.asc"))
-gras1940<-raster(here::here("hyde_data","gras1940AD.asc"))
+crop1940<-raster(here::here("data","crop1940AD.asc"))
+gras1940<-raster(here::here("data","gras1940AD.asc"))
 
-crop1950<-raster(here::here("hyde_data","crop1950AD.asc"))
-gras1950<-raster(here::here("hyde_data","gras1950AD.asc"))
+crop1950<-raster(here::here("data","crop1950AD.asc"))
+gras1950<-raster(here::here("data","gras1950AD.asc"))
 
-crop1960<-raster(here::here("hyde_data","crop1960AD.asc"))
-gras1960<-raster(here::here("hyde_data","gras1960AD.asc"))
+crop1960<-raster(here::here("data","crop1960AD.asc"))
+gras1960<-raster(here::here("data","gras1960AD.asc"))
 
-crop1970<-raster(here::here("hyde_data","crop1970AD.asc"))
-gras1970<-raster(here::here("hyde_data","gras1970AD.asc"))
+crop1970<-raster(here::here("data","crop1970AD.asc"))
+gras1970<-raster(here::here("data","gras1970AD.asc"))
 
-crop1980<-raster(here::here("hyde_data","crop1980AD.asc"))
-gras1980<-raster(here::here("hyde_data","gras1980AD.asc"))
+crop1980<-raster(here::here("data","crop1980AD.asc"))
+gras1980<-raster(here::here("data","gras1980AD.asc"))
 
-crop1990<-raster(here::here("hyde_data","crop1990AD.asc"))
-gras1990<-raster(here::here("hyde_data","gras1990AD.asc"))
+crop1990<-raster(here::here("data","crop1990AD.asc"))
+gras1990<-raster(here::here("data","gras1990AD.asc"))
 
-crop2000<-raster(here::here("hyde_data","crop2000AD.asc"))
-gras2000<-raster(here::here("hyde_data","gras2000AD.asc"))
+crop2000<-raster(here::here("data","crop2000AD.asc"))
+gras2000<-raster(here::here("data","gras2000AD.asc"))
 
-crop2005<-raster(here::here("hyde_data","crop2005AD.asc"))
-gras2005<-raster(here::here("hyde_data","gras2005AD.asc"))
+crop2005<-raster(here::here("data","crop2005AD.asc"))
+gras2005<-raster(here::here("data","gras2005AD.asc"))
 
 
 rlist<-list(crop1940,crop1950,crop1960,crop1970,crop1980,crop1990,crop2000,crop2005,gras1940,gras1950,gras1960,gras1970,gras1980,gras1990,gras2000,gras2005)
@@ -332,12 +337,12 @@ for (map in rlist){
   map_pcnt <- signif(values(map),digits=4)/cellareas
   map_pcnt_m <- matrix(map_pcnt, nrow=nrow(map), ncol=ncol(map), byrow=TRUE)
   map_pcnt_r <- raster(map_pcnt_m, xmn=map@extent[1], xmx=map@extent[2], ymn=map@extent[3], ymx=map@extent[4])
-  writeRaster(map_pcnt_r, here::here("hyde_data", paste0(names(map),"_raster.tif")),overwrite=TRUE)
+  writeRaster(map_pcnt_r, here::here("data", paste0(names(map),"_raster.tif")),overwrite=TRUE)
   print(names(map))
 }
 
-crop_s<-stack(list.files(path = here::here("hyde_data"), pattern = "^.*crop*.*.tif$", full.names = TRUE))
-gras_s<-stack(list.files(path =  here::here("hyde_data"), pattern = "^.*gras*.*.tif$", full.names = TRUE))
+crop_s<-stack(list.files(path = here::here("data"), pattern = "^.*crop*.*.tif$", full.names = TRUE))
+gras_s<-stack(list.files(path =  here::here("data"), pattern = "^.*gras*.*.tif$", full.names = TRUE))
 
 ```
 
@@ -345,7 +350,7 @@ gras_s<-stack(list.files(path =  here::here("hyde_data"), pattern = "^.*gras*.*.
 ```{r, cache=TRUE}
 ###########LPI data
 
-LPI_LUC <- read.csv("populations_to_use.csv")
+LPI_LUC <- read.csv(here("data", "populations_to_use.csv"))
 
 latlong <- cbind(LPI_LUC$Longitude,LPI_LUC$Latitude)
 
@@ -375,7 +380,6 @@ nrow(grid_crop2)
 ```{r, cache=TRUE, eval=FALSE}
 
 result <- data.frame() #empty result dataframe
-
 grid_crop2[grid_crop2 == 'NULL'] <- NA
 
 for (i in 1:length(grid_crop2$ID)){
@@ -451,13 +455,14 @@ for (i in 1:length(grid_crop2$ID)){
   
 }
 
-write.csv(result, "HYDE_LPI_rate_of_change.csv", row.names = FALSE)
+write.csv(result, here("data","HYDE_LPI_rate_of_change.csv"), row.names = FALSE)
 
 ```
 
+
 ```{r, cache=TRUE, warning=FALSE}
-lpi <- read.csv("populations_to_use.csv")
-bm <- read.csv("Amniote_Database_Aug_2015.csv")
+lpi <- read.csv(here("data","populations_to_use.csv"))
+bm <- read.csv(here("data","Amniote_Database_Aug_2015.csv"))
 bm$Binomial <- paste(bm$genus, bm$species, sep="_")
 
 lpibm <- merge(lpi, bm, by="Binomial")
@@ -473,7 +478,7 @@ lpibm2 <- unique(lpibm2)
 
 lpibm2$Log_Body_Mass_g <- log10(lpibm2$Body_mass_g)
 
-write.csv(lpibm2, "LPI_BodyMass_Amniote_Database.csv", row.names = FALSE)
+write.csv(lpibm2, here("data","LPI_BodyMass_Amniote_Database.csv"), row.names = FALSE)
 
 ```
 
@@ -482,11 +487,11 @@ Setting up the modelling
 ```{r, warning=FALSE, message=FALSE}
 
 #temp <- read.csv("Mean_Temp_Change_LPI_pops.csv", stringsAsFactors = FALSE)
-temp <- read.csv("All_LPI_All_Years_Nobuff_1931_moreLPI_end2005.csv")
-bm <- read.csv("LPI_BodyMass_Amniote_Database.csv", stringsAsFactors = FALSE)
+temp <- read.csv(here("data", "All_LPI_All_Years_Nobuff_1931_moreLPI_end2005.csv"))
+bm <- read.csv(here("data","LPI_BodyMass_Amniote_Database.csv"), stringsAsFactors = FALSE)
 bm <- bm[,-3]
 
-hyde <- read.csv("HYDE_LPI_rate_of_change.csv", stringsAsFactors = FALSE)
+hyde <- read.csv(here("data", "HYDE_LPI_rate_of_change.csv"), stringsAsFactors = FALSE)
 hyde <- hyde %>% 
   dplyr::select(-"Binomial")
 
@@ -495,9 +500,9 @@ temp <- temp %>%
 
 #temp <- merge(temp, hyde[,c(2,3)], by.x = "ID", by.y = "id")
 
-LPI <- read.csv("LPI_pops_20160523_edited.csv")
+LPI <- read.csv(here("data", "LPI_pops_20160523_edited.csv"))
 
-pop <- read.csv("Global_Population_Lambdas.csv")
+pop <- read.csv(here("data","Global_Population_Lambdas.csv"))
 
 pop <- pop %>% 
   rename(ID = sp_name)
@@ -513,8 +518,8 @@ df <- merge(merge(temp,bm, by="ID"), merge(LPI, pop, by="ID"),by = c("ID", "Bino
 dfd <- merge(df, hyde, by.y = "id", by.x = "ID")
 
 df2 <- dfd %>% 
-  filter(!is.na(Estimate) & r_sq >= 0.4999999  & time >= 5 & System!="Marine" & Specific_location == 1 & !is.na(both_change)& !is.na(Log_Body_Mass_g) & Protected_status != "Unknown" & Protected_status != "Both" & (Class == "Mammalia") & Region == "Africa") %>% 
-  group_by(Binomial, Latitude, Longitude, Estimate) %>% 
+  filter(!is.na(Estimate) & r_sq >= 0.4999999  & time >= 5 & System!="Marine" & Specific_location == 1 & !is.na(both_change)& !is.na(Log_Body_Mass_g)& Class == "Mammalia") %>% 
+    group_by(Binomial, Latitude, Longitude, Estimate) %>%
   filter(n() == 1)
 
 
